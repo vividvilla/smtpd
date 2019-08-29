@@ -129,7 +129,7 @@ import (
     "github.com/mhale/smtpd"
 )
 
-func mailHandler(origin net.Addr, from string, to []string, data []byte) {
+func mailHandler(origin net.Addr, from string, to []string, data []byte, auth *smtpd.Auth) {
     msg, _ := mail.ReadMessage(bytes.NewReader(data))
     subject := msg.Header.Get("Subject")
     log.Printf("Received mail from %s for %s with subject %s", from, to[0], subject)
@@ -183,8 +183,8 @@ ListenAndServe("127.0.0.1:2525", mailHandler, rcptHandler)
 With the same ```mailHandler``` as above:
 
 ```go
-func authHandler(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
-    return string(username) == "valid" && string(password) == "password", nil
+func authHandler(auth *smtpd.Auth) (bool, error) {
+    return string(auth.Username) == "valid" && string(auth.Password) == "password", nil
 }
 
 func ListenAndServe(addr string, handler smtpd.Handler, authHandler smtpd.AuthHandler) error {

@@ -20,6 +20,15 @@ import (
 	"time"
 )
 
+const (
+	// AuthPlain represents plain authentication.
+	AuthPlain = "PLAIN"
+	// AuthLogin represents login authentication.
+	AuthLogin = "LOGIN"
+	// AuthCramMD5 represents MD5 cram authentication.
+	AuthCramMD5 = "CRAM-MD5"
+)
+
 var (
 	// Debug `true` enables verbose logging.
 	Debug      = false
@@ -29,13 +38,13 @@ var (
 )
 
 // Handler function called upon successful receipt of an email.
-type Handler func(remoteAddr net.Addr, from string, to []string, data []byte)
+type Handler func(remoteAddr net.Addr, from string, to []string, data []byte, auth *Auth)
 
 // HandlerRcpt function called on RCPT. Return accept status.
 type HandlerRcpt func(remoteAddr net.Addr, from string, to string) bool
 
 // AuthHandler function called when a login attempt is performed. Returns true if credentials are correct.
-type AuthHandler func(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error)
+type AuthHandler func(*Auth) (bool, error)
 
 // ListenAndServe listens on the TCP network address addr
 // and then calls Serve with handler to handle requests
@@ -193,6 +202,16 @@ type session struct {
 	remoteName    string // Remote hostname as supplied with EHLO
 	tls           bool
 	authenticated bool
+	auth          *Auth
+}
+
+// Auth details.
+type Auth struct {
+	Username   []byte
+	Password   []byte
+	Mechanism  string
+	RemoteAddr net.Addr
+	Shared     []byte
 }
 
 // Create new session from connection.
@@ -383,7 +402,7 @@ loop:
 
 			// Pass mail on to handler.
 			if s.srv.Handler != nil {
-				go s.srv.Handler(s.conn.RemoteAddr(), from, to, buffer.Bytes())
+				go s.srv.Handler(s.conn.RemoteAddr(), from, to, buffer.Bytes(), s.auth)
 			}
 
 			// Reset for next mail.
@@ -491,11 +510,11 @@ loop:
 			// when attempting to use an unsupported authentication type.
 			// Many servers return 5.7.4 ("Security features not supported") instead.
 			switch authType {
-			case "PLAIN":
+			case AuthPlain:
 				s.authenticated, err = s.handleAuthPlain(authArgs)
-			case "LOGIN":
+			case AuthLogin:
 				s.authenticated, err = s.handleAuthLogin(authArgs)
-			case "CRAM-MD5":
+			case AuthCramMD5:
 				s.authenticated, err = s.handleAuthCramMD5()
 			}
 
@@ -626,9 +645,12 @@ func (s *session) makeHeaders(to []string) []byte {
 
 // Determine allowed authentication mechanisms.
 // RFC 4954 specifies that plaintext authentication mechanisms such as LOGIN and PLAIN require a TLS connection.
-// This can be explicitly overridden e.g. setting s.srv.AuthMechs["LOGIN"] = true.
+// This can be explicitly overridden e.g. setting s.srv.AuthMechs[AuthLogin] = true.
 func (s *session) authMechs() (mechs map[string]bool) {
-	mechs = map[string]bool{"LOGIN": s.tls, "PLAIN": s.tls, "CRAM-MD5": true}
+	mechs = map[string]bool{}
+	mechs[AuthPlain] = s.tls
+	mechs[AuthLogin] = s.tls
+	mechs[AuthCramMD5] = true
 
 	for mech := range mechs {
 		allowed, found := s.srv.AuthMechs[mech]
@@ -696,8 +718,17 @@ func (s *session) handleAuthLogin(arg string) (bool, error) {
 		return false, errors.New("501 5.5.2 Syntax error (unable to decode)")
 	}
 
+	// Store auth details to session.
+	s.auth = &Auth{
+		RemoteAddr: s.conn.RemoteAddr(),
+		Mechanism:  AuthLogin,
+		Username:   username,
+		Password:   password,
+		Shared:     nil,
+	}
+
 	// Validate credentials.
-	authenticated, err := s.srv.AuthHandler(s.conn.RemoteAddr(), "LOGIN", username, password, nil)
+	authenticated, err := s.srv.AuthHandler(s.auth)
 
 	return authenticated, err
 }
@@ -724,8 +755,17 @@ func (s *session) handleAuthPlain(arg string) (bool, error) {
 		return false, errors.New("501 5.5.2 Syntax error (unable to parse)")
 	}
 
+	// Store auth details to session.
+	s.auth = &Auth{
+		RemoteAddr: s.conn.RemoteAddr(),
+		Mechanism:  AuthPlain,
+		Username:   parts[1],
+		Password:   parts[2],
+		Shared:     nil,
+	}
+
 	// Validate credentials.
-	authenticated, err := s.srv.AuthHandler(s.conn.RemoteAddr(), "PLAIN", parts[1], parts[2], nil)
+	authenticated, err := s.srv.AuthHandler(s.auth)
 
 	return authenticated, err
 }
@@ -754,8 +794,17 @@ func (s *session) handleAuthCramMD5() (bool, error) {
 		return false, errors.New("501 5.5.2 Syntax error (unable to parse)")
 	}
 
+	// Store auth details to session.
+	s.auth = &Auth{
+		RemoteAddr: s.conn.RemoteAddr(),
+		Mechanism:  AuthCramMD5,
+		Username:   []byte(fields[0]),
+		Password:   []byte(fields[1]),
+		Shared:     []byte(shared),
+	}
+
 	// Validate credentials.
-	authenticated, err := s.srv.AuthHandler(s.conn.RemoteAddr(), "CRAM-MD5", []byte(fields[0]), []byte(fields[1]), []byte(shared))
+	authenticated, err := s.srv.AuthHandler(s.auth)
 
 	return authenticated, err
 }

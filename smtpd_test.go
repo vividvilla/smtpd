@@ -643,8 +643,8 @@ func parseExtensions(t *testing.T, greeting string) map[string]string {
 
 // Handler function for validating authentication credentials.
 // The secret parameter is passed as nil for LOGIN and PLAIN authentication mechanisms.
-func authHandler(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
-	return string(username) == "valid", nil
+func authHandler(auth *Auth) (bool, error) {
+	return string(auth.Username) == "valid", nil
 }
 
 // Test the extensions listed in response to an EHLO command.
