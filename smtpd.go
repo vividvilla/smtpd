@@ -648,9 +648,9 @@ func (s *session) makeHeaders(to []string) []byte {
 // This can be explicitly overridden e.g. setting s.srv.AuthMechs[AuthLogin] = true.
 func (s *session) authMechs() (mechs map[string]bool) {
 	mechs = map[string]bool{}
-	mechs[AuthPlain] = s.tls
-	mechs[AuthLogin] = s.tls
-	mechs[AuthCramMD5] = true
+	mechs[AuthPlain] = true
+	mechs[AuthLogin] = true
+	mechs[AuthCramMD5] = false
 
 	for mech := range mechs {
 		allowed, found := s.srv.AuthMechs[mech]
